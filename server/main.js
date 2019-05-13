@@ -5,30 +5,56 @@ const port = process.env.PORT || 3000;
 const WebSocketServer = WebSocket.Server;
 const server = new WebSocketServer({ port: port });
 
+const send = (client, payload) => client.send(JSON.stringify(payload));
+
 const broadcast = payload => {
   server.clients.forEach(client => {
-    client.send(JSON.stringify(payload));
+    send(client, payload);
   });
 };
 
+let channels = {};
+let users = [];
+
+const getChannel = ({ username }) => channels[username];
+
+const compose = ({ body, to, from }) => {
+  const channel = getChannel(to);
+  const message = {
+    type: 'NEW_MESSAGE',
+    payload: { body, from, to, date: new Date() }
+  };
+  send(channel, message);
+};
+
+const connect = channel => {
+  const name = faker.name.firstName();
+  const username = faker.internet.userName(name);
+  const user = {
+    name,
+    avatar: faker.internet.avatar(),
+    username
+  };
+
+  channels[username] = channel;
+  users = [...users, user];
+  return user;
+};
+
 server.on('connection', ws => {
-  console.log('New connection arrived');
-  const name = faker.internet.userName();
-  const avatar = faker.internet.avatar();
-  const user = { name, avatar };
-  broadcast({ type: 'CONNECT', user });
-  ws.on('message', message => {
-    try {
-      const date = new Date();
-      console.log(name, date, message);
-      const type = 'NEW_MESSAGE';
-      broadcast({ type, message, date, user });
-    } catch (e) {
-      console.error(e.message);
-    }
+  const user = connect(ws);
+  broadcast({ type: 'CONNECT', payload: { user } });
+  send(ws, { type: 'REGISTER', payload: { users, user } });
+  console.log(user);
+
+  ws.on('message', payload => {
+    const { body, to } = JSON.parse(payload);
+    compose({ body, to, from: user });
   });
+
   ws.on('close', () => {
-    broadcast({ type: 'DISCONNECT', user });
+    broadcast({ type: 'DISCONNECT', payload: { user } });
+    users = users.filter(u => u.username !== user.username);
   });
 });
 
